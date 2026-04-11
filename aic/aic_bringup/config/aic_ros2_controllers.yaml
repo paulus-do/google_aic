@@ -1,0 +1,121 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 500  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    fts_broadcaster:
+      type: force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster
+
+    aic_controller:
+      type: aic/Controller
+
+    # enforce_command_limit: false
+
+fts_broadcaster:
+  ros__parameters:
+    frame_id: ati/tool_link
+    sensor_name: AtiForceTorqueSensor
+    update_rate: 50
+
+aic_controller:
+  ros__parameters:
+    # Currently, only "impedance" control mode is suppported.
+    # Impedance requires effort command interfaces for specified joints,
+    # and requires position and velocity state interfaces for specified joints.
+    control_mode: "impedance"
+
+    # Default target mode. Available values are "joint" or "cartesian".
+    # Cartesian target mode accepts MotionUpdate targets, which are specified in tool/cartesian space.
+    # Joint target mode accepts JointMotionUpdate targets, which are specified in joint space.
+    target_mode: "cartesian"
+
+    # Namespace of admittance controller for chaining controller interfaces
+    admittance_controller_namespace: "admittance_controller"
+
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+    impedance:
+      gravity_compensation: true
+      stiffness_smoothing_constant: 0.1
+      damping_smoothing_constant: 0.1
+      activation_percentage: 0.0
+      pose_error_integrator:
+        gain: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        bound: [10., 10., 10., 2., 2., 2.]
+      maximum_wrench: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
+      nullspace:
+        target_configuration: [0.6, -1.5708, -1.5708, -1.5708, 1.5708, 0.6]
+        stiffness: [0., 0., 0., 0., 0., 0.]
+        damping: [10., 10., 10., 10., 10., 10.]
+      feedforward_interpolation:
+        min_wrench: [-40., -40., -40., -5., -5., -5.]
+        max_wrench: [40., 40., 40., 5., 5., 5.]
+        max_wrench_dot: [500., 500., 500., 25., 25., 25.]
+      default_values:
+        control_stiffness: [75.0, 75.0, 75.0, 75.0, 75.0, 75.0]
+        control_damping: [35.0, 35.0, 35.0, 35.0, 35.0, 35.0]
+        offset_wrench: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    joint_impedance:
+      interpolator:
+        min_value: [-40., -40., -40., -6., -6., -6.]
+        max_value: [40., 40., 40., 6., 6., 6.]
+        max_step_size: [1., 1., 1., 1., 1., 1.]
+      default_values:
+        control_stiffness: [100., 100., 100., 50., 50., 50.]
+        control_damping: [40.0, 40.0, 40.0, 15.0, 15.0, 15.0]
+
+    kinematics:
+      plugin_name: kinematics_interface_kdl/KinematicsInterfaceKDL
+      plugin_package: kinematics_interface
+      base: base_link # Assumed to be stationary
+      tip: gripper/tcp # Frame ID of tool center point
+      alpha: 0.0005 # Specifies the damping coefficient for the Jacobian pseudo inverse.
+
+    force_torque_sensor:
+      name: AtiForceTorqueSensor
+
+    clamp_to_limits:
+      min_translational_position:
+        - -5.0 # x
+        - -5.0 # y
+        - -5.0 # z
+      max_translational_position:
+        - 5.0 # x
+        - 5.0 # y
+        - 5.0 # z
+      min_translational_velocity:
+        - -0.25 # x
+        - -0.25 # y
+        - -0.25 # z
+      max_translational_velocity:
+        - 0.25 # x
+        - 0.25 # y
+        - 0.25 # z
+      min_rotation_angle:
+        - -3.14159 # x
+        - -3.14159 # y
+        - -3.14159 # z
+      max_rotation_angle:
+        - 3.14159 # x
+        - 3.14159 # y
+        - 3.14159 # z
+      max_rotational_velocity: 2.0 # [rad/s]
+      tracking_error:
+        timeout: 2.0 # [s]
+        min_angular_change: 0.01 #[rad]
+        min_translation_change: 0.01 #[m]
+        min_translation_error: 0.2 #[m] make sure it's larger than min_translation_change to avoid instability
+
+    control_frequency: 500.0 # [Hz]
+
+    # If enabled, the parameters will be dynamically updated while the controller is running.
+    enable_parameter_update_without_reactivation: true

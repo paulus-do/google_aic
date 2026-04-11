@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>aic_engine</name>
+  <version>0.0.1</version>
+  <description>A package to orchestrate the AI Challenge</description>
+  <maintainer email="yadunund@intrinsic.ai">Yadunund Vijay</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>aic_scoring</depend>
+  <depend>aic_control_interfaces</depend>
+  <depend>aic_engine_interfaces</depend>
+  <depend>aic_task_interfaces</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>controller_manager_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>lifecycle_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>simulation_interfaces</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>yaml_cpp_vendor</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

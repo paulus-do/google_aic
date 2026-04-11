@@ -1,0 +1,258 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="$(arg name)">
+  <!-- robot name parameter -->
+  <xacro:arg name="name" default="ur"/>
+  <!-- import UR macro -->
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <!-- import ATI Axia80-M20 macro -->
+  <xacro:include filename="$(find aic_assets)/models/Axia80 M20/axia80_m20_macro.xacro"/>
+  <xacro:include filename="$(find aic_assets)/models/Camera Mount/cam_mount_macro.xacro"/>
+  <xacro:include filename="$(find aic_assets)/models/Basler Camera/basler_camera_macro.xacro"/>
+  <xacro:include filename="$(find aic_assets)/models/Robotiq Hand-E/robotiq_hande_macro.xacro"/>
+
+  <xacro:include filename="$(find ur_description)/urdf/inc/ur_joint_control.xacro" />
+
+  <xacro:property name="D2R" value="${pi / 180.0}"/>
+
+  <!-- possible 'ur_type' values: ur3, ur5, ur10, ur3e, ur5e, ur7e, ur10e, ur12e, ur16e, ur8long, ur15, ur20, ur30 -->
+  <!-- the default value should raise an error in case this was called without defining the type -->
+  <xacro:arg name="ur_type" default="ur5e"/>
+
+  <!-- parameters -->
+  <xacro:arg name="tf_prefix" default="" />
+  <xacro:arg name="joint_limit_params" default="$(find ur_description)/config/$(arg ur_type)/joint_limits.yaml"/>
+  <xacro:arg name="kinematics_params" default="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"/>
+  <xacro:arg name="physical_params" default="$(find ur_description)/config/$(arg ur_type)/physical_parameters.yaml"/>
+  <xacro:arg name="visual_params" default="$(find ur_description)/config/$(arg ur_type)/visual_parameters.yaml"/>
+  <xacro:arg name="transmission_hw_interface" default=""/>
+  <xacro:arg name="safety_limits" default="false"/>
+  <xacro:arg name="safety_pos_margin" default="0.15"/>
+  <xacro:arg name="safety_k_position" default="20"/>
+
+  <xacro:arg name="simulation_controllers" default="" />
+  <xacro:arg name="ros_namespace" default="" />
+
+  <xacro:arg name="ati_tf_prefix" default="ati/" />
+  <xacro:arg name="cam_mount_tf_prefix" default="cam_mount/" />
+  <xacro:arg name="left_camera_tf_prefix" default="left_camera/"/>
+  <xacro:arg name="center_camera_tf_prefix" default="center_camera/"/>
+  <xacro:arg name="right_camera_tf_prefix" default="right_camera/"/>
+  <xacro:arg name="gripper_tf_prefix" default="gripper/"/>
+  <xacro:arg name="gripper_initial_pos" default="0.00655"/>
+  <xacro:arg name="cam_mount_radial_offset" default="0.1" />
+  <xacro:arg name="cam_mount_axial_offset" default="0.08" />
+  <!-- If true, enable Gazebo camera in sim -->
+  <xacro:arg name="use_sim_cam" default="${True}"/>
+
+  <!-- Pose arguments for robot positioning -->
+  <xacro:arg name="x" default="0.0" />
+  <xacro:arg name="y" default="0.0" />
+  <xacro:arg name="z" default="0.0" />
+  <xacro:arg name="roll" default="0.0" />
+  <xacro:arg name="pitch" default="0.0" />
+  <xacro:arg name="yaw" default="0.0" />
+
+  <!-- Configure hardware plugin -->
+  <xacro:arg name="hardware_plugin" default="gz_ros2_control/GazeboSimSystem"/>
+
+  <!-- create link fixed to the "world" -->
+  <link name="world" />
+  <link name="tabletop" />
+
+  <joint name="tabletop_joint" type="fixed">
+    <origin xyz="$(arg x) $(arg y) $(arg z)" rpy="$(arg roll) $(arg pitch) $(arg yaw)" />
+    <parent link="world"/>
+    <child link="tabletop"/>
+  </joint>
+
+  <!-- <link name="ground_plane">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <box size="5 5 0"/>
+      </geometry>
+      <material name="ground_white">
+        <color rgba="1 1 1 0.5"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <box size="5 5 0"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="ground_plane_joint" type="fixed">
+    <origin xyz="$(arg x) $(arg y) $(arg z)" rpy="$(arg roll) $(arg pitch) $(arg yaw)" />
+    <parent link="world"/>
+    <child link="ground_plane"/>
+  </joint> -->
+
+  <!-- arm -->
+  <xacro:ur_robot
+    name="$(arg name)"
+    tf_prefix="$(arg tf_prefix)"
+    parent="tabletop"
+    joint_limits_parameters_file="$(arg joint_limit_params)"
+    kinematics_parameters_file="$(arg kinematics_params)"
+    physical_parameters_file="$(arg physical_params)"
+    visual_parameters_file="$(arg visual_params)"
+    safety_limits="$(arg safety_limits)"
+    safety_pos_margin="$(arg safety_pos_margin)"
+    safety_k_position="$(arg safety_k_position)"
+    force_abs_paths="true"
+    >
+    <origin xyz="0 0 0" rpy="0 0 0" />          <!-- position robot in the world -->
+  </xacro:ur_robot>
+
+  <gazebo reference="world">
+  </gazebo>
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(arg simulation_controllers)</parameters>
+      <ros>
+        <namespace>$(arg ros_namespace)</namespace>
+      </ros>
+    </plugin>
+    <plugin filename="gz-sim-forcetorque-system"
+            name="gz::sim::systems::ForceTorque">
+    </plugin>
+
+    <plugin filename="OffLimitContactsPlugin" name="aic_gazebo::OffLimitContactsPlugin">
+      <update_rate>5</update_rate>
+      <topic>/aic/gazebo/contacts/off_limit</topic>
+      <off_limit_models>
+        <model>enclosure</model>
+        <model>enclosure walls</model>
+        <model>task_board</model>
+      </off_limit_models>
+    </plugin>
+    <plugin filename="ResetJointsPlugin" name="aic_gazebo::ResetJointsPlugin"> </plugin>
+  </gazebo>
+
+  <!-- ATI Force Torque sensor -->
+  <xacro:axia80_m20
+    tf_prefix="$(arg ati_tf_prefix)"
+    >
+  </xacro:axia80_m20>
+
+  <!-- Camera Mount -->
+  <xacro:camera_mount
+    tf_prefix="$(arg cam_mount_tf_prefix)"
+    >
+  </xacro:camera_mount>
+
+  <xacro:basler_camera
+    name="left_camera"
+    tf_prefix="$(arg left_camera_tf_prefix)"
+    use_sim_cam="$(arg use_sim_cam)"
+    >
+  </xacro:basler_camera>
+
+  <xacro:basler_camera
+    name="center_camera"
+    tf_prefix="$(arg center_camera_tf_prefix)"
+    use_sim_cam="$(arg use_sim_cam)"
+    >
+  </xacro:basler_camera>
+
+  <xacro:basler_camera
+    name="right_camera"
+    tf_prefix="$(arg right_camera_tf_prefix)"
+    use_sim_cam="$(arg use_sim_cam)"
+    >
+  </xacro:basler_camera>
+
+  <xacro:robotiq_hande
+    name="gripper"
+    tf_prefix="$(arg gripper_tf_prefix)"
+    grip_pos_min="0.0"
+    grip_pos_max="0.025"
+    grip_vel_max="0.05"
+    grip_effort_min="20"
+    grip_effort_max="130"
+    initial_pos="$(arg gripper_initial_pos)"
+    >
+  </xacro:robotiq_hande>
+
+  <joint name="attach_cam_mount" type="fixed">
+    <origin xyz="0 0 -.0265" rpy="0 0 0"/>
+    <parent link="$(arg tf_prefix)tool0"/>
+    <child link="$(arg cam_mount_tf_prefix)cam_mount_link"/>
+  </joint>
+
+  <joint name="attach_ft_sensor_joint" type="fixed">
+    <origin xyz="0 0 0.0265" rpy="0 0 0"/>
+    <parent link="$(arg cam_mount_tf_prefix)cam_mount_link"/>
+    <child link="$(arg ati_tf_prefix)base_link"/>
+  </joint>
+
+  <!-- *******************
+       ** center_camera **
+       ******************* -->
+
+  <joint name="attach_center_camera" type="fixed">
+    <origin xyz="0 -0.1077 -.00719" rpy="0 -1.30899630 1.57079623"/>
+    <parent link="$(arg cam_mount_tf_prefix)cam_mount_link"/>
+    <child link="$(arg center_camera_tf_prefix)camera_link"/>
+  </joint>
+
+  <!-- *****************
+       ** left_camera **
+       ***************** -->
+
+  <joint name="attach_left_camera" type="fixed">
+    <origin xyz="-0.09326 -0.053843 -0.007188" rpy="0 -1.30899630 0.523599027"/>
+    <parent link="$(arg cam_mount_tf_prefix)cam_mount_link"/>
+    <child link="$(arg left_camera_tf_prefix)camera_link"/>
+  </joint>
+
+  <!-- ******************
+       ** right_camera **
+       ****************** -->
+
+  <joint name="attach_right_camera" type="fixed">
+    <origin xyz="0.09326 -0.053843 -0.007188" rpy="0 -1.30899630 2.61799343"/>
+    <parent link="$(arg cam_mount_tf_prefix)cam_mount_link"/>
+    <child link="$(arg right_camera_tf_prefix)camera_link"/>
+  </joint>
+
+  <joint name="attach_gripper" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="$(arg ati_tf_prefix)tool_link"/>
+    <child link="$(arg gripper_tf_prefix)hande_base_link"/>
+  </joint>
+
+  <!-- ros2 control instance -->
+  <ros2_control name="ControlSystem" type="system">
+    <hardware>
+      <plugin>$(arg hardware_plugin)</plugin>
+    </hardware>
+
+    <sensor name="AtiForceTorqueSensor" type="force_torque">
+      <state_interface name="force.x"/>
+      <state_interface name="force.y"/>
+      <state_interface name="force.z"/>
+      <state_interface name="torque.x"/>
+      <state_interface name="torque.y"/>
+      <state_interface name="torque.z"/>
+      <!-- Needed for MuJoCo -->
+      <param name="type">FTSensor</param>
+      <param name="frame_id">ati/tool_link</param>
+    </sensor>
+
+    <xacro:ur_joint_control_description
+      tf_prefix="$(arg tf_prefix)"
+      initial_positions="${dict(
+        shoulder_pan_joint=-0.1597,
+        shoulder_lift_joint=-1.3542,
+        elbow_joint=-1.6648,
+        wrist_1_joint=-1.6933,
+        wrist_2_joint=1.5710,
+        wrist_3_joint=1.4110)}"
+    />
+
+  </ros2_control>
+
+</robot>

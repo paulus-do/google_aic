@@ -1,0 +1,212 @@
+# Getting Started
+
+Welcome to the AI for Industry Challenge! Follow this guide to familiarize yourself with the toolkit structure, prepare  your environment, and confirm your setup by running a quickstart example before developing your solution.
+
+> [!NOTE]
+> **ROS 2 Distribution:** Official evaluation of all submissions will be conducted using **ROS 2 Kilted Kaiju**. If you choose to develop or test your policy using a different ROS 2 distribution (e.g., Humble or Jazzy), it is entirely your responsibility to ensure compatibility and support. Please note that **inter-distro communication is not guaranteed and not officially supported**. For those new to ROS 2, we strongly encourage completing the [official ROS 2 tutorials](https://docs.ros.org/en/kilted/Tutorials.html).
+
+## Architecture Overview
+
+The challenge uses a two-component architecture:
+
+1. **Evaluation Component** (provided) - Runs the simulation, robot, sensors, and scoring system
+2. **Participant Model** (you implement) - Your ROS 2 node that processes sensor data and commands the robot
+
+**Source code for both components is available in this toolkit.** Since the Evaluation Component will not change during the competition, we publish a Docker image (`aic_eval`) for convenience that you can reuse—this is the **recommended workflow**. Advanced users who prefer to build from source can follow the [Building from Source](./build_eval.md) guide.
+
+For a detailed explanation of the architecture, packages, and interfaces, see the [Toolkit Architecture](../README.md#toolkit-architecture) section in the README.
+
+---
+
+## Requirements
+
+**Minimum Compute Specifications:**
+
+- **OS:** Ubuntu 24.04
+- **CPU:** 4-8 cores
+- **RAM:** 32GB+
+- **GPU:** NVIDIA RTX 2070+ or equivalent
+- **VRAM:** 8GB+
+
+> [!NOTE]
+> While the challenge can run on systems without a GPU, performance will be significantly reduced. See [Troubleshooting](./troubleshooting.md#no-gpu-available) for optimization tips for CPU-only systems.
+
+**Cloud Evaluation Instance:**
+
+For cloud evaluation, all participant submissions will be evaluated on the same instance type with the following specifications:
+
+- **vCPU:** 64 cores
+- **RAM:** 256 GiB
+- **GPU:** 1 x NVIDIA L4 Tensor Core
+- **VRAM:** 24 GiB
+
+---
+
+## Setup
+
+First, install the following tools:
+* [Docker](#setup-docker) (required)
+* [Distrobox](#setup-distrobox) (required)
+* [Pixi](#setup-pixi) (required)
+* [NVIDIA Container Toolkit](#setup-and-configure-nvidia-container-toolkit) (optional - for NVIDIA GPU users)
+
+### Setup Docker
+
+1. Install [Docker Engine](https://docs.docker.com/engine/install/) for your platform.
+2. Complete the [Linux post-installation steps for Docker Engine](https://docs.docker.com/engine/install/linux-postinstall/) to enable managing Docker as a non-root user.
+
+### Setup and Configure NVIDIA Container Toolkit (Optional)
+
+> [!NOTE]
+> This step is only required if you have an NVIDIA GPU and want to use GPU acceleration for optimal performance.
+
+1. Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) to allow Docker Engine to access your NVIDIA GPU.
+
+2. After installation, configure Docker to use the NVIDIA runtime:
+    ```bash
+    sudo nvidia-ctk runtime configure --runtime=docker
+    sudo systemctl restart docker
+    ```
+
+### Setup Distrobox
+
+We use [Distrobox](https://distrobox.it/) to tightly integrate the `aic_eval` container with your host system. We recommend installing Distrobox using your package manager. Check the [supported distros](https://distrobox.it/#installation) to see if your distribution supports Distrobox.
+
+For Ubuntu, run:
+```bash
+sudo apt install distrobox
+```
+
+For other distributions, refer to the [Alternative methods](https://distrobox.it/#alternative-methods).
+
+### Setup Pixi
+
+We use [Pixi](https://pixi.prefix.dev/latest/) to manage packages and dependencies, including ROS 2.
+
+For Ubuntu, run:
+```bash
+curl -fsSL https://pixi.sh/install.sh | sh
+# Restart your terminal after installation
+```
+
+For other operating systems, refer to the [Alternative Installation Methods](https://pixi.prefix.dev/latest/installation/#alternative-installation-methods).
+
+> [!IMPORTANT]
+> Changes to packages within a Pixi environment are not tracked automatically. To apply updates, you must run `pixi reinstall <package_name>`.
+
+## Quick Start
+
+This section will guide you through:
+1. **Setting Up Your Workspace** - Clone the challenge repository and install dependencies using Pixi
+2. **Running the Evaluation Component** - Start the `aic_eval` container to bring up the simulation environment, robot, sensors, and scoring system
+3. **Running an Example Policy** - Execute a provided example policy from your local workspace against the evaluation container
+
+Once you've completed these steps and want to prepare your submission, see the [Submission Guidelines](./submission.md) to learn how to containerize your participant workspace.
+
+---
+### Step 1: Set Up Your Workspace
+
+```bash
+# Clone this repo
+mkdir -p ~/ws_aic/src
+cd ~/ws_aic/src
+git clone https://github.com/intrinsic-dev/aic
+
+# Install and build dependencies
+cd ~/ws_aic/src/aic
+pixi install
+```
+
+**What you should see:**
+- Pixi downloading and installing ROS 2 packages and dependencies
+- A successful installation message when complete
+- A `.pixi` directory created in your workspace with all dependencies
+
+---
+### Step 2: Start the Evaluation Container
+
+```bash
+# Indicate distrobox to use Docker as container manager
+export DBX_CONTAINER_MANAGER=docker
+
+# Create and enter the eval container
+docker pull ghcr.io/intrinsic-dev/aic/aic_eval:latest
+# If you do *not* have an NVIDIA GPU, remove the --nvidia flag for GPU support
+distrobox create -r --nvidia -i ghcr.io/intrinsic-dev/aic/aic_eval:latest aic_eval
+distrobox enter -r aic_eval
+
+# Inside the container, start the environment
+/entrypoint.sh ground_truth:=false start_aic_engine:=true
+```
+
+The [`entrypoint.sh`](../docker/aic_eval/Dockerfile) script runs a Zenoh router and the [`aic_gz_bringup.launch.py`](../aic_bringup/README.md#1-aic_gz_bringuplaunchpy) launch file with `aic_engine`.
+
+> [!NOTE]
+> The evaluation container is essentially a pre-built workspace and `/entrypoint.sh` is not the only way to use it. You can enter the container, source the workspace (`source /ws_aic/install/setup.bash`), and run or launch any of the commands described in any of the package READMEs and documentation.
+
+**What you should see:**
+- Two windows open: **Gazebo** (simulation) and **RViz** (visualization)
+- In Gazebo: A workcell with a Universal Robots UR5e manipulator mounted on a table
+- In the terminal: Log messages indicating the AIC engine has initialized and is waiting for the `aic_model` node (`No node with name 'aic_model' found. Retrying...`)
+- No robot movement yet (the robot is waiting for your policy to connect)
+
+![Evaluation Environment](../../media/eval_environment_waiting.png)
+
+See [Scene Description](./scene_description.md) for more details about the simulation environment.
+
+> [!Note]
+> If the `docker pull` command fails, you may need to [log in to ghcr.io](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-with-a-personal-access-token-classic).
+
+> [!NOTE]
+> The `aic_engine` node in the evaluation container expects to find the `aic_model` node (see Step 3) within 30 seconds, after which it will time out. However, since the evaluation container starts the Zenoh router, this step (`/entrypoint.sh`) must be run *before* starting the `aic_model` node in Step 3.
+
+---
+
+### Step 3: Run an Example Policy
+
+With the simulation environment running (Step 2), run the following policy:
+```bash
+cd ~/ws_aic/src/aic
+pixi run ros2 run aic_model aic_model --ros-args -p use_sim_time:=true -p policy:=aic_example_policies.ros.WaveArm
+```
+
+> [!NOTE]
+> Because `pixi run` creates its own environment and runs `aic_model` inside it, the `pixi run` invocation can occur outside Docker and distrobox. It is typically easier, faster, and simpler to run it outside the container.
+
+Once the `aic_model` node starts, the AIC engine spawns a task board and a gripper-attached cable in the Gazebo window. The eval container terminal will then track three successive trials and display their scores. See [Scoring](./scoring.md) for more details.
+
+**Note:** The `WaveArm` policy is a dummy example that simply moves the robot arm back and forth in a waving motion. It does not attempt to solve the cable insertion task. The purpose of this example is to demonstrate how the [`aic_engine`](../aic_engine/README.md) orchestrates trials based on the [sample configuration](../aic_engine/config/sample_config.yaml) and scores the policy based on its performance (which will be poor in this case, as expected).
+
+**What you should see:**
+- **In Gazebo**: The task board and a cable attached to the gripper appear in the simulation
+- **In the robot**: The arm moves back and forth in a waving motion
+- **In the eval container terminal**:
+  - Log messages showing trial progression (Trial 1/3, Trial 2/3, Trial 3/3)
+  - Scoring information after each trial
+  - Final summary with total scores across all trials
+- The robot performing three successive trials automatically
+- **Results saved to**: `$HOME/aic_results/` (or `$AIC_RESULTS_DIR` if set)
+
+![Wave Arm Policy](../../media/wave_arm_policy.gif)
+
+If the robot doesn't move or you don't see the expected behavior, check the [Troubleshooting](./troubleshooting.md) section.
+
+For more example policies and expected scoring results, see the [Scoring Test & Evaluation Guide](./scoring_tests.md).
+
+---
+
+## 🎉 Congratulations!
+
+You've successfully completed the Quick Start guide! You now have:
+- ✅ A running evaluation environment with Gazebo and RViz
+- ✅ A local Pixi workspace with all dependencies installed
+- ✅ Experience running an example policy and seeing how the AIC engine orchestrates trials
+
+**Next:** When you're ready to submit your solution, you'll need to containerize your participant workspace. See the [Submission Guidelines](./submission.md) for detailed instructions on packaging and submitting your policy.
+
+---
+
+## Next Steps
+
+Now that your environment is set up, run the same evluation container but with different [baseline solutions](../aic_example_policies/README.md).
+Then proceed with the **💻 Develop Your Policy** section in the [Toolkit Guide](../README.md#toolkit-guide).

@@ -51,6 +51,10 @@ x-default-isaac-lab-volumes: &default-isaac-lab-volumes
   - type: bind
     source: ../tools
     target: ${DOCKER_ISAACLAB_PATH}/tools
+  # Local AIC tree: live host edits inside the container (rebuild not required)
+  - type: bind
+    source: ../aic
+    target: ${DOCKER_ISAACLAB_PATH}/aic
     # The effect of these volumes is twofold:
     # 1. Prevent root-owned files from flooding the _build and logs dir
     #    on the host machine
