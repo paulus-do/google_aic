@@ -214,14 +214,6 @@ def extract_act_observations(
 ) -> dict:
     """Pull raw sensor data from the Isaac Lab env and package it for ACT.
 
-    -----------------------------------------------------------------------
-    IMPORTANT — you MUST adapt the sensor / articulation accessor names
-    below to match your specific Isaac Lab task configuration.  The names
-    used here (e.g. "left_camera", "center_camera", "right_camera" for
-    tiled cameras, "robot" for the articulation) are *placeholders* that
-    follow common AIC conventions.  Check your task's scene configuration
-    to find the correct attribute names.
-    -----------------------------------------------------------------------
 
     The function accesses the *unwrapped* environment to reach Isaac Lab's
     scene-level sensor objects, because the standard `env.get_observations()`
