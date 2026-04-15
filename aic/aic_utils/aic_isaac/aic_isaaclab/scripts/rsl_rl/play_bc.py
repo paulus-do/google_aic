@@ -301,13 +301,11 @@ def extract_act_observations(
     #   TCP angular velocity  (3)  — from controller_state.tcp_velocity.angular
     #   TCP error             (6)  — from controller_state.tcp_error
     #   Joint positions       (7)  — from joint_states.position[:7]
-    #
-    # How to get these from Isaac Lab depends on your env/scene setup.
-    # Below is a TEMPLATE using common Isaac Lab APIs.  You will almost
-    # certainly need to adjust attribute names.
+
     # ------------------------------------------------------------------
     robot = scene["robot"]  # Articulation asset
-        # --- Resolve EE body index once ---
+        # --- Resolve EE body index once---
+        #-------I am not certain if this is correct or from which frame they want it---------------
     if not hasattr(extract_act_observations, "_ee_idx_resolved"):
         body_names = robot.data.body_names
         print(f"[ACT DEBUG] Robot body names: {body_names}")
@@ -393,10 +391,10 @@ def extract_act_observations(
 
     # Assemble the 26-dim state vector in EXACTLY the same order as training
     state_np = np.concatenate([
-        tcp_pos_w,        # 3
-        tcp_quat_w,       # 4  (x, y, z, w)
-        tcp_lin_vel_w,    # 3
-        tcp_ang_vel_w,    # 3
+        tcp_pos,        # 3
+        tcp_quat,       # 4  (x, y, z, w)
+        tcp_lin_vel,    # 3
+        tcp_ang_vel,    # 3
         tcp_error,      # 6
         joint_pos,      # 7
     ]).astype(np.float32)
