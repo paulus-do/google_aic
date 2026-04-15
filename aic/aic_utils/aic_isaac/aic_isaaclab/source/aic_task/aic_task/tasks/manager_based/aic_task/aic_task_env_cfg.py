@@ -71,12 +71,12 @@ class AICTaskSceneCfg(InteractiveSceneCfg):
             pos=(-0.18, -0.122, 0),
             rot=(0.0, 0.0, 0.0, 1.0),
             joint_pos={
-                "shoulder_pan_joint": 0.1597,
-                "shoulder_lift_joint": -1.3542,
-                "elbow_joint": -1.6648,
-                "wrist_1_joint": -1.6933,
-                "wrist_2_joint": 1.5710,
-                "wrist_3_joint": 1.4110,
+                "shoulder_pan_joint": 0.1597,#-1.789,
+                "shoulder_lift_joint": -1.3542,#0.012,
+                "elbow_joint": -1.6648,#-1.527,
+                "wrist_1_joint":  -1.6933,#-0.374,
+                "wrist_2_joint": 1.5710,#-1.279,
+                "wrist_3_joint": 1.4110,#1.262,
             },
         ),
         actuators={
@@ -306,19 +306,19 @@ class EventCfg:
         },
     )
 
-    # randomize_robot_pose = EventTerm(
-    #     func=mdp.reset_root_state_uniform,
-    #     mode="reset",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot"),
-    #         "pose_range": {
-    #             "x": (-0.1, 0.1),   # random offset around init_state
-    #             "y": (-0.1, 0.1),
-    #             "z": (0.0, 0.0),
-    #         },
-    #         "velocity_range": {},
-    #     },
-    # )
+    #randomize_robot_pose = EventTerm(
+    #    func=mdp.reset_root_state_uniform,
+    #    mode="reset",
+    #    params={
+    #        "asset_cfg": SceneEntityCfg("robot"),
+    #        "pose_range": {
+    #            "x": (-0.1, 0.1),   # random offset around init_state
+    #            "y": (-0.1, 0.1),
+    #            "z": (0.0, 0.0),
+    #        },
+    #        "velocity_range": {},
+    #    },
+    #)
 
     randomize_light = EventTerm(
         func=randomize_dome_light,
@@ -588,8 +588,8 @@ class AICTaskEnvCfg(ManagerBasedRLEnvCfg):
         ].body_names = ee_body
         self.rewards.reaching_bonus.params["asset_cfg"].body_names = ee_body
 
-        # # Arm action: joint position control
-        # self.actions.arm_action = JointPositionActionCfg(
+         # Arm action: joint position control
+        #self.actions.arm_action = JointPositionActionCfg(
         #     asset_name="robot", joint_names=[".*"], scale=0.5, use_default_offset=True
         # )
 
@@ -605,7 +605,7 @@ class AICTaskEnvCfg(ManagerBasedRLEnvCfg):
                 "wrist_3_joint",
             ],
             body_name="wrist_3_link",
-            controller=DifferentialIKControllerCfg(
+           controller=DifferentialIKControllerCfg(
                 command_type="pose",
                 use_relative_mode=True,
                 ik_method="svd",

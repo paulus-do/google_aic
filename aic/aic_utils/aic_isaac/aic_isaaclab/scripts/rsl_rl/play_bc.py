@@ -201,6 +201,36 @@ def img_to_tensor(
 
 
 # ===========================================================================
+# Helper: quaternion math for world → base_link frame transformation
+# ===========================================================================
+def quat_conjugate(q_wxyz: np.ndarray) -> np.ndarray:
+    """Conjugate of quaternion in (w, x, y, z) format."""
+    return np.array([q_wxyz[0], -q_wxyz[1], -q_wxyz[2], -q_wxyz[3]])
+
+
+def quat_multiply(q1_wxyz: np.ndarray, q2_wxyz: np.ndarray) -> np.ndarray:
+    """Multiply two quaternions in (w, x, y, z) format: q1 * q2."""
+    w1, x1, y1, z1 = q1_wxyz
+    w2, x2, y2, z2 = q2_wxyz
+    return np.array([
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2,
+    ], dtype=np.float32)
+
+
+def quat_to_rot_matrix(q_wxyz: np.ndarray) -> np.ndarray:
+    """Convert quaternion (w, x, y, z) to 3×3 rotation matrix."""
+    w, x, y, z = q_wxyz
+    return np.array([
+        [1 - 2*(y*y + z*z),     2*(x*y - w*z),     2*(x*z + w*y)],
+        [    2*(x*y + w*z), 1 - 2*(x*x + z*z),     2*(y*z - w*x)],
+        [    2*(x*z - w*y),     2*(y*z + w*x), 1 - 2*(x*x + y*y)],
+    ], dtype=np.float32)
+
+
+# ===========================================================================
 # Helper: extract ACT-compatible observations from the Isaac Lab environment
 # ===========================================================================
 def extract_act_observations(
@@ -277,59 +307,82 @@ def extract_act_observations(
     # certainly need to adjust attribute names.
     # ------------------------------------------------------------------
     robot = scene["robot"]  # Articulation asset
-
-    # --- One-time discovery: print all body names so you can verify the EE index ---
+        # --- Resolve EE body index once ---
     if not hasattr(extract_act_observations, "_ee_idx_resolved"):
         body_names = robot.data.body_names
         print(f"[ACT DEBUG] Robot body names: {body_names}")
         print(f"[ACT DEBUG] Robot joint names: {robot.data.joint_names}")
         print(f"[ACT DEBUG] num_bodies={robot.data.body_pos_w.shape[1]}, "
               f"num_joints={robot.data.joint_pos.shape[1]}")
-
-        # Try to find the EE body by common name patterns.
-        ee_candidates = [
-            "gripper_tcp", "tool0", "flange",
-            "ee_link", "tool_link", "flange_link", "panda_hand",
-            "end_effector", "tcp_link", "link_ee", "gripper_link",
-        ]
-        ee_idx = None
-        for candidate in ee_candidates:
-            try:
-                result = robot.find_bodies(candidate)
-                if result is not None and len(result[0]) > 0:
-                    ee_idx = result[0][0]
-                    print(f"[ACT DEBUG] Found EE body '{candidate}' at index {ee_idx}")
-                    break
-            except (ValueError, RuntimeError):
-                continue
-
-        if ee_idx is None:
-            # Fallback: use the last body (often the EE in serial manipulators)
-            ee_idx = robot.data.body_pos_w.shape[1] - 1
-            print(f"[ACT DEBUG] No known EE name found, using last body index {ee_idx} "
-                  f"('{body_names[ee_idx]}'). Adjust if wrong!")
-
+ 
+        # Use gripper_tcp for state observations — this is the real robot's TCP
+        # frame that the ACT policy was trained with.
+        try:
+            result = robot.find_bodies("gripper_tcp")
+            ee_idx = result[0][0]
+            print(f"[ACT DEBUG] Using 'gripper_tcp' at body index {ee_idx} for state observations")
+        except (ValueError, RuntimeError):
+            raise RuntimeError("Could not find 'gripper_tcp' body — check your URDF/USD")
+ 
+        # Also find base_link for frame transformation
+        try:
+            result = robot.find_bodies("base_link")
+            base_idx = result[0][0]
+            print(f"[ACT DEBUG] Using 'base_link' at body index {base_idx} for frame transform")
+        except (ValueError, RuntimeError):
+            raise RuntimeError("Could not find 'base_link' body — check your URDF/USD")
+ 
         extract_act_observations._ee_idx = ee_idx
+        extract_act_observations._base_idx = base_idx
         extract_act_observations._ee_idx_resolved = True
-
+ 
     ee_idx = extract_act_observations._ee_idx
+    base_idx = extract_act_observations._base_idx
 
-    # Joint positions — (num_envs, num_joints) → first 7 for the arm
-    joint_pos = robot.data.joint_pos[env_idx, :7].cpu().numpy()  # (7,)
+    # ------------------------------------------------------------------
+    # FRAME TRANSFORMATION: world → base_link
+    # ------------------------------------------------------------------
+    # RunACT's training data has TCP pose/vel in base_link frame (ROS).
+    # Isaac Lab gives everything in world frame.
+    # The robot base is at pos=(-0.18, -0.122, 0) with rot=(0,0,0,1) wxyz
+    # which is a 180° rotation around Z — so world ≠ base_link!
+    # ------------------------------------------------------------------
+    base_pos_w = robot.data.body_pos_w[env_idx, base_idx].cpu().numpy()   # (3,)
+    base_quat_w = robot.data.body_quat_w[env_idx, base_idx].cpu().numpy() # (4,) wxyz
 
-    # TCP pose — from the articulation's rigid-body state for the EE body
-    # body_pos_w: (num_envs, num_bodies, 3),  body_quat_w: (num_envs, num_bodies, 4)
-    tcp_pos  = robot.data.body_pos_w[env_idx, ee_idx].cpu().numpy()    # (3,)
-    tcp_quat = robot.data.body_quat_w[env_idx, ee_idx].cpu().numpy()   # (4,) wxyz in Isaac Lab!
+    # Rotation matrix: world → base_link
+    R_base_in_world = quat_to_rot_matrix(base_quat_w)       # base_link axes in world
+    R_world_to_base = R_base_in_world.T                       # inverse rotation
 
-    # IMPORTANT: Isaac Lab uses (w, x, y, z) quaternion convention,
-    # but RunACT training data uses (x, y, z, w) from ROS.
-    # Re-order: wxyz → xyzw
-    tcp_quat = np.array([tcp_quat[1], tcp_quat[2], tcp_quat[3], tcp_quat[0]], dtype=np.float32)
+    # Joint positions — use first 6 measured joints + fixed joint7 constant
+    # (Joint positions are internal to the articulation, not frame-dependent)
+    joint_pos = np.concatenate([
+        robot.data.joint_pos[env_idx, :6].cpu().numpy().astype(np.float32),
+        np.array([-1.954], dtype=np.float32),
+    ])  # (7,)
 
-    # TCP velocity — from rigid body state
-    tcp_lin_vel = robot.data.body_lin_vel_w[env_idx, ee_idx].cpu().numpy()  # (3,)
-    tcp_ang_vel = robot.data.body_ang_vel_w[env_idx, ee_idx].cpu().numpy()  # (3,)
+    # TCP pose in WORLD frame
+    tcp_pos_w  = robot.data.body_pos_w[env_idx, ee_idx].cpu().numpy()    # (3,)
+    tcp_quat_w = robot.data.body_quat_w[env_idx, ee_idx].cpu().numpy()   # (4,) wxyz
+
+    # --- Transform position: world → base_link ---
+    tcp_pos = R_world_to_base @ (tcp_pos_w - base_pos_w)  # (3,) in base_link frame
+
+    # --- Transform orientation: world → base_link ---
+    # q_in_base = conj(q_base) * q_tcp_world  (both wxyz)
+    tcp_quat_in_base = quat_multiply(quat_conjugate(base_quat_w), tcp_quat_w)  # (4,) wxyz
+
+    # Convert wxyz → xyzw for ROS/ACT convention
+    tcp_quat = np.array([
+        tcp_quat_in_base[1], tcp_quat_in_base[2],
+        tcp_quat_in_base[3], tcp_quat_in_base[0],
+    ], dtype=np.float32)
+
+    # --- Transform velocities: world → base_link ---
+    tcp_lin_vel_w = robot.data.body_lin_vel_w[env_idx, ee_idx].cpu().numpy()  # (3,)
+    tcp_ang_vel_w = robot.data.body_ang_vel_w[env_idx, ee_idx].cpu().numpy()  # (3,)
+    tcp_lin_vel = R_world_to_base @ tcp_lin_vel_w  # (3,) in base_link frame
+    tcp_ang_vel = R_world_to_base @ tcp_ang_vel_w  # (3,) in base_link frame
 
     # TCP error — this is controller-specific.  If your Isaac Lab env
     # exposes a Cartesian impedance controller with error tracking, read
@@ -340,10 +393,10 @@ def extract_act_observations(
 
     # Assemble the 26-dim state vector in EXACTLY the same order as training
     state_np = np.concatenate([
-        tcp_pos,        # 3
-        tcp_quat,       # 4  (x, y, z, w)
-        tcp_lin_vel,    # 3
-        tcp_ang_vel,    # 3
+        tcp_pos_w,        # 3
+        tcp_quat_w,       # 4  (x, y, z, w)
+        tcp_lin_vel_w,    # 3
+        tcp_ang_vel_w,    # 3
         tcp_error,      # 6
         joint_pos,      # 7
     ]).astype(np.float32)
@@ -376,6 +429,7 @@ def main(
     env_cfg.sim.device = (
         args_cli.device if args_cli.device is not None else env_cfg.sim.device
     )
+
 
     # --- Create the environment ---
     env = gym.make(
@@ -418,10 +472,41 @@ def main(
 
     image_scaling = 0.25  # must match training (RunACT.image_scaling)
 
+    # --- Diagnostics setup ---
+    diag_dir = "/tmp/act_debug"
+    os.makedirs(diag_dir, exist_ok=True)
+    DIAG_STEPS = 5  # dump full diagnostics for the first N steps
+    print(f"[DIAG] Saving diagnostic dumps to {diag_dir} for first {DIAG_STEPS} steps")
+
+    # Print normalization stats so we can sanity check
+    print(f"[DIAG] state_mean = {state_mean.cpu().numpy()}")
+    print(f"[DIAG] state_std  = {state_std.cpu().numpy()}")
+    print(f"[DIAG] action_mean = {action_mean.cpu().numpy()}")
+    print(f"[DIAG] action_std  = {action_std.cpu().numpy()}")
+
     # --- Reset ---
     obs_rl, _ = env.reset()  # the flat RL observation (we won't use it for ACT)
     policy.reset()
     timestep = 0
+
+    # --- Also check what the env action space actually is ---
+    print(f"[DIAG] env action space: {env.action_space}")
+    print(f"[DIAG] env observation space: {env.observation_space}")
+
+    # Check coordinate frame: is the robot base at world origin?
+    scene = env.unwrapped.scene
+    robot = scene["robot"]
+    try:
+        base_link_idx = robot.find_bodies("base_link")[0][0]
+    except (ValueError, RuntimeError):
+        base_link_idx = 2  # fallback
+    base_pos = robot.data.body_pos_w[0, base_link_idx].cpu().numpy()
+    base_quat = robot.data.body_quat_w[0, base_link_idx].cpu().numpy()
+    print(f"[DIAG] base_link position (world): {base_pos}")
+    print(f"[DIAG] base_link orientation (wxyz, world): {base_quat}")
+    R_base = quat_to_rot_matrix(base_quat)
+    print(f"[DIAG] base_link rotation matrix:\n{R_base}")
+    print(f"[DIAG] → Frame transform is now applied: world → base_link for all state values")
 
     print("[INFO] Starting ACT BC play loop …")
 
@@ -437,6 +522,59 @@ def main(
             image_scaling=image_scaling, env_idx=0,
         )
 
+        # --- DIAGNOSTICS: dump images and raw state for first N steps ---
+        if timestep < DIAG_STEPS:
+            scene = env.unwrapped.scene
+            for cam_name in ("left", "center", "right"):
+                cam_sensor = scene[f"{cam_name}_camera"]
+                rgba = cam_sensor.data.output["rgb"]
+                img_gpu = rgba[0, :, :, :3]
+
+                if img_gpu.dtype == torch.float32:
+                    img_np = (img_gpu.cpu().numpy() * 255).astype(np.uint8)
+                else:
+                    img_np = img_gpu.cpu().numpy().astype(np.uint8)
+
+                # Save raw image (before resize/normalize) — RGB
+                raw_path = os.path.join(diag_dir, f"step{timestep}_{cam_name}_raw_rgb.png")
+                cv2.imwrite(raw_path, cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR))
+
+                # Save the normalized tensor as a visualization
+                norm_tensor = obs_dict[f"observation.images.{cam_name}_camera"]
+                # Undo normalization for visualization
+                vis = norm_tensor[0].cpu()  # (3, H', W')
+                vis = vis * img_stats[cam_name]["std"].cpu().squeeze() .view(3,1,1) \
+                    + img_stats[cam_name]["mean"].cpu().squeeze().view(3,1,1)
+                vis = (vis.clamp(0, 1) * 255).byte().permute(1, 2, 0).numpy()
+                norm_path = os.path.join(diag_dir, f"step{timestep}_{cam_name}_after_normalize.png")
+                cv2.imwrite(norm_path, cv2.cvtColor(vis, cv2.COLOR_RGB2BGR))
+
+                print(f"[DIAG] {cam_name} raw shape: {img_np.shape}, "
+                      f"dtype: {img_np.dtype}, "
+                      f"range: [{img_np.min()}, {img_np.max()}], "
+                      f"tensor shape: {norm_tensor.shape}")
+
+            # Print raw (un-normalized) robot state — these are in BASE_LINK frame
+            raw_state = obs_dict["observation.state"]
+            raw_state_unnorm = (raw_state * state_std + state_mean)[0].cpu().numpy()
+            print(f"[DIAG] step {timestep} RAW state in BASE_LINK frame (un-normalized, 26-dim):")
+            print(f"  TCP pos (3):      {raw_state_unnorm[0:3]}")
+            print(f"  TCP quat xyzw (4): {raw_state_unnorm[3:7]}")
+            print(f"  TCP lin vel (3):  {raw_state_unnorm[7:10]}")
+            print(f"  TCP ang vel (3):  {raw_state_unnorm[10:13]}")
+            print(f"  TCP error (6):    {raw_state_unnorm[13:19]}")
+            print(f"  Joint pos (7):    {raw_state_unnorm[19:26]}")
+
+            # Also print world-frame values for comparison
+            robot_diag = env.unwrapped.scene["robot"]
+            ee_diag = extract_act_observations._ee_idx
+            tcp_w = robot_diag.data.body_pos_w[0, ee_diag].cpu().numpy()
+            tcp_qw = robot_diag.data.body_quat_w[0, ee_diag].cpu().numpy()
+            print(f"  (world-frame TCP pos for comparison: {tcp_w})")
+            print(f"  (world-frame TCP quat wxyz:          {tcp_qw})")
+
+            print(f"[DIAG] step {timestep} NORMALIZED state: {raw_state[0].cpu().numpy()}")
+
         # 2. ACT inference
         with torch.inference_mode():
             normalized_action = policy.select_action(obs_dict)  # (1, 7)
@@ -445,13 +583,36 @@ def main(
         raw_action = (normalized_action * action_std) + action_mean  # (1, 7)
         action_np = raw_action[0].cpu().numpy()  # (7,)
 
+        if timestep < DIAG_STEPS:
+            print(f"[DIAG] step {timestep} NORMALIZED action: {normalized_action[0].cpu().numpy()}")
+            print(f"[DIAG] step {timestep} RAW action (un-norm): {action_np}")
+
         print(f"[ACT] step {timestep} | twist: {action_np[:6]} | gripper: {action_np[6]:.4f}")
 
-        # 4. Convert to the shape the Isaac Lab env expects
-        #    ACT outputs 7 dims: 6D Cartesian twist (lin xyz + ang xyz) + gripper.
-        #    The Isaac Lab env action space is 6D (twist only), so drop the gripper dim.
-        action_6d = action_np[:6]
-        action_tensor = torch.from_numpy(action_6d).float().unsqueeze(0).to(device)
+        # 4. Convert ACT twist velocity → differential IK pose delta
+        #
+        #    ACT outputs:  [vx, vy, vz, wx, wy, wz] in m/s and rad/s
+        #    Env expects:  [dx, dy, dz, droll, dpitch, dyaw] as a relative pose delta
+        #    Env internally scales by 0.05, and we call env.step() N times per ACT step.
+        #
+        #    Desired total displacement = twist × policy_dt
+        #    Actual total displacement  = steps_per_action × action_input × ik_scale
+        #
+        #    Therefore: action_input = (twist × policy_dt) / (steps_per_action × ik_scale)
+        #
+        ik_scale = 0.05  # from DifferentialInverseKinematicsActionCfg.scale
+        twist_6d = action_np[:6]
+        pose_delta_per_step = (twist_6d * policy_dt) / (steps_per_action * ik_scale)
+
+        if timestep < DIAG_STEPS:
+            total_delta = twist_6d * policy_dt
+            print(f"[DIAG] step {timestep} twist→delta conversion:")
+            print(f"  raw twist (m/s, rad/s): {twist_6d}")
+            print(f"  desired total delta:    {total_delta}")
+            print(f"  per-step IK input:      {pose_delta_per_step}")
+            print(f"  (× {steps_per_action} steps × {ik_scale} scale = {steps_per_action * ik_scale * pose_delta_per_step})")
+
+        action_tensor = torch.from_numpy(pose_delta_per_step).float().unsqueeze(0).to(device)
 
         # 5. Step the simulation (repeat the same action for steps_per_action)
         for _ in range(steps_per_action):
